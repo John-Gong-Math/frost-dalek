@@ -11,13 +11,13 @@ use crate::Parameters;
 use crate::Participant;
 use crate::SignatureAggregator;
 
+
+/// A simulation for t out n threshold signature, where primary is the array of indices of the t parties.
 #[no_mangle]
 pub unsafe extern "C" fn simulation(_n: u32, _t: u32, primary: &[u32], msg: &[u8]) {
     let (n, t) = (4, 3);
     let params = Parameters { n, t };
-    // let primary: &[u32] = primary.as_ref().unwrap();
-    // let msg: &[u8] = msg.as_ref().unwrap();
-
+    
     let (p1, p1coeffs) = Participant::new(&params, 1);
     let (p2, p2coeffs) = Participant::new(&params, 2);
     let (p3, p3coeffs) = Participant::new(&params, 3);
@@ -73,6 +73,8 @@ pub unsafe extern "C" fn simulation(_n: u32, _t: u32, primary: &[u32], msg: &[u8
     let p3_state = p3_state.to_round_two(p3_my_secret_shares).unwrap();
     let p4_state = p4_state.to_round_two(p4_my_secret_shares).unwrap();
 
+    // group key is common for all parties, to be used for partial signatures.
+    //pi_sk is private key for each parties, to be used for generating public key and partial signatures. 
     let (group_key, p1_sk) = p1_state.finish(p1.public_key().unwrap()).unwrap();
     let (_, p2_sk) = p2_state.finish(p2.public_key().unwrap()).unwrap();
     let (_, p3_sk) = p3_state.finish(p3.public_key().unwrap()).unwrap();
@@ -80,22 +82,20 @@ pub unsafe extern "C" fn simulation(_n: u32, _t: u32, primary: &[u32], msg: &[u8
 
     let sk_vec = vec!(p1_sk, p2_sk, p3_sk, p4_sk);
 
-    let context = b"CONTEXT STRING STOLEN FROM DALEK TEST SUITE";
-    //let message = b"This is a test of the tsunami alert system. This is only a test.";
+    // For security reasons, we add the separation message to avoid repetition attack. 
+    let context = b"CONTEXT STRING FOR THE COURSE 720 BLABLABLA";
 
+    // For each siganure, we use fresh commitment shares for all parties.
     let mut commitment_vec = Vec::new();
     for i in 0..n {
         let (public_comshares, secret_comshares) = generate_commitment_share_lists(&mut OsRng, i + 1, 1);
         commitment_vec.push((public_comshares, secret_comshares));
     }
 
-    // let (p1_public_comshares, mut p1_secret_comshares) = generate_commitment_share_lists(&mut OsRng, 1, 1);
-    // let (p2_public_comshares, mut p2_secret_comshares) = generate_commitment_share_lists(&mut OsRng, 2, 1);
-    // let (p3_public_comshares, mut p3_secret_comshares) = generate_commitment_share_lists(&mut OsRng, 3, 1);
-    // let (p4_public_comshares, mut p4_secret_comshares) = generate_commitment_share_lists(&mut OsRng, 4, 1);
-
+    // The role of primary / aggregator can be assigned to any untrusted party, including the participants of the signature precedures.
     let mut aggregator = SignatureAggregator::new(params, group_key, &context[..], &msg[..]);
 
+    // The aggregator determins which participants will give their partial signatures
     for i in primary.iter() {
         let idx = i + 1;
         let (public_comshares, _) = &commitment_vec[idx as usize - 1];
@@ -104,10 +104,7 @@ pub unsafe extern "C" fn simulation(_n: u32, _t: u32, primary: &[u32], msg: &[u8
 
     }
 
-    // aggregator.include_signer(1, p1_public_comshares.commitments[0], (&p1_sk).into());
-    // aggregator.include_signer(3, p3_public_comshares.commitments[0], (&p3_sk).into());
-    // aggregator.include_signer(4, p4_public_comshares.commitments[0], (&p4_sk).into());
-
+    // the list of the participants chosen by the aggregator
     let signers = aggregator.get_signers();
     let message_hash = compute_message_hash(&context[..], &msg[..]);
     let mut partial_vec = Vec::new();
@@ -118,27 +115,19 @@ pub unsafe extern "C" fn simulation(_n: u32, _t: u32, primary: &[u32], msg: &[u8
         let sk = &sk_vec[idx as usize - 1];
         let partial = sk.sign(&message_hash, &group_key, secret_comshares, 0, signers).unwrap();
         partial_vec.push(partial);
-        //aggregator.include_partial_signature(partial);   
     }
 
+    // aggregate all the required partial signatures
     for partial in partial_vec.into_iter() {
         aggregator.include_partial_signature(partial);
     }
 
     let aggregator = aggregator.finalize().unwrap();
+
+    // the final signature to be verified by all parties
     let threshold_signature = aggregator.aggregate().unwrap();
 
     threshold_signature.verify(&group_key, &message_hash).unwrap();
-
-    // let p1_partial = p1_sk.sign(&message_hash, &group_key, &mut p1_secret_comshares, 0, signers).unwrap();
-    // let p3_partial = p3_sk.sign(&message_hash, &group_key, &mut p3_secret_comshares, 0, signers).unwrap();
-    // let p4_partial = p4_sk.sign(&message_hash, &group_key, &mut p4_secret_comshares, 0, signers).unwrap();
-
-    // aggregator.include_partial_signature(p1_partial);
-    // aggregator.include_partial_signature(p3_partial);
-    // aggregator.include_partial_signature(p4_partial);
-
-    //let aggregator = aggregator.finalize().unwrap();
 
 }
 
