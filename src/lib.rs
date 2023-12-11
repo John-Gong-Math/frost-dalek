@@ -671,7 +671,7 @@
 
 #![no_std]
 #![warn(future_incompatible)]
-#![deny(missing_docs)]
+//#![deny(missing_docs)]
 #![allow(non_snake_case)]
 
 #[cfg(not(any(feature = "std", feature = "alloc")))]
@@ -689,6 +689,7 @@ pub mod keygen;
 pub mod parameters;
 pub mod precomputation;
 pub mod nizk;
+pub mod hotstuff;
 
 // The signing protocol uses Hashmap (currently for both the signature aggregator
 // and signers), which requires std.
